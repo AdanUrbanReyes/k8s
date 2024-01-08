@@ -1,0 +1,97 @@
+apiVersion: v1
+data:
+  postgresqlApplicationPassword: Y2hhbmdlbWU=
+  postgresqlRootPassword: Y2hhbmdlbWU=
+kind: Secret
+metadata:
+  creationTimestamp: null
+  name: postgresql-secret
+---
+apiVersion: v1
+data:
+  application.sh: |
+    #!/bin/bash -xe
+    echo "Creating Clouddriver DB..."
+    psql -U postgres -c "CREATE DATABASE application;"
+    psql -U postgres -c \
+      "CREATE USER root WITH ENCRYPTED PASSWORD '${POSTGRES_PASSWORD}'; \
+      CREATE USER application_full_access WITH ENCRYPTED PASSWORD '${POSTGRESQL_APPLICATION_PASSWORD}'; \
+      ALTER USER root WITH SUPERUSER; \
+      ALTER USER application_full_access WITH SUPERUSER; \
+      GRANT CONNECT ON DATABASE application TO root; \
+      GRANT CONNECT ON DATABASE application TO application_full_access;"
+kind: ConfigMap
+metadata:
+  name: postgresql-init-db
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: postgresql
+spec:
+  ports:
+  - port: 5432
+  selector:
+    app: postgresql
+  type: LoadBalancer
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: postgresql
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: postgresql
+  serviceName: postgresql
+  template:
+    metadata:
+      labels:
+        app: postgresql
+    spec:
+      containers:
+      - args:
+        env:
+        - name: POSTGRES_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              key: postgresqlRootPassword
+              name: postgresql-secret
+        - name: POSTGRESQL_APPLICATION_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              key: postgresqlApplicationPassword
+              name: postgresql-secret
+        image: postgres:latest
+        name: postgresql
+        ports:
+        - containerPort: 5432
+          name: postgresql
+        resources:
+          requests:
+            cpu: 500m
+            memory: 1Gi
+        volumeMounts:
+        - mountPath: /var/lib/postgresql/data
+          name: postgresql-persistent-storage
+        - mountPath: /docker-entrypoint-initdb.d
+          name: init-db
+      volumes:
+      - name: postgresql-persistent-storage
+        persistentVolumeClaim:
+          claimName: postgresql-pvc
+      - configMap:
+          name: postgresql-init-db
+        name: init-db
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: postgresql-pvc
+spec:
+  accessModes:
+  - ReadWriteOnce
+  resources:
+    requests:
+      storage: 2Gi

@@ -1,0 +1,16 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: greetings
+spec:
+  backoffLimit: 4
+  template:
+    spec:
+      containers:
+        - command:
+            - echo
+            - hello world
+          image: 'ubuntu:latest'
+          name: greetings
+      restartPolicy: Never
+
